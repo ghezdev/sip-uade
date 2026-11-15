@@ -12,7 +12,7 @@ The project has historical material from early tests and the first presentation.
 
 First test material:
 
-- `FirstTests/detector_caidas.py`
+- `archive/FirstTests/detector_caidas.py`
 - Uses OpenCV, MediaPipe, NumPy, and optional Telegram alerts.
 - Detects body posture using pose landmarks.
 - Tracks hip descent, fall speed, body aspect ratio, and immobility time.
@@ -21,17 +21,17 @@ First test material:
 
 First presentation material:
 
-- `Presentation1/fallDetectionTestingV1.py`
-- `Presentation1/TestLocal1Video.mp4`
-- `Presentation1/Una-caida-puede-cambiar-el-dia.pdf`
+- `archive/Presentation1/fallDetectionTestingV1.py`
+- `archive/Presentation1/TestLocal1Video.mp4`
+- `archive/Presentation1/Una-caida-puede-cambiar-el-dia.pdf`
 
 Rules for agents and future development:
 
-- `FirstTests/` is only the first test that was run.
-- `Presentation1/` is only the first presentation material.
-- Ignore all files in `Presentation1/` when designing or implementing the final system.
+- `archive/FirstTests/` is only the first test that was run.
+- `archive/Presentation1/` is only the first presentation material.
+- Ignore all files in `archive/Presentation1/` when designing or implementing the final system.
 - Do not treat any existing prototype file as the final source of truth.
-- Use this `AGENT.md` file as the planning and architecture guide until a real implementation exists.
+- Use this `AGENTS.md` file as the planning and architecture guide until a real implementation exists.
 
 ## Architecture
 
@@ -201,7 +201,7 @@ The web layer should not call MediaPipe directly and should not know how fall cl
 
 ```text
 sip-uade/
-  AGENT.md
+  AGENTS.md
   README.md
   fall_detection/
     __init__.py
@@ -225,14 +225,15 @@ sip-uade/
   tests/
     test_fall_detector.py
     test_alert_service.py
-  FirstTests/
-    detector_caidas.py
-    evidencia-prompt-claude.md
-    Guia rapida de armado.md
-  Presentation1/
-    fallDetectionTestingV1.py
-    TestLocal1Video.mp4
-    Una-caida-puede-cambiar-el-dia.pdf
+  archive/
+    FirstTests/
+      detector_caidas.py
+      evidencia-prompt-claude.md
+      Guía rápida de armado.md
+    Presentation1/
+      fallDetectionTestingV1.py
+      TestLocal1Video.mp4
+      Una-caida-puede-cambiar-el-dia.pdf
 ```
 
 ## Implementation Phases
@@ -384,8 +385,8 @@ Initial decisions:
 - Use FastAPI for future web/API backend.
 - Keep detector independent from web and Telegram.
 - Keep camera/MediaPipe code in adapters, not inside the detector engine.
-- Treat `FirstTests/` as historical first-test material.
-- Ignore `Presentation1/` for implementation decisions.
+- Treat `archive/FirstTests/` as historical first-test material.
+- Ignore `archive/Presentation1/` for implementation decisions.
 
 Open decisions:
 
