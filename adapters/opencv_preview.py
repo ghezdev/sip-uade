@@ -1,4 +1,4 @@
-"""Optional diagnostics; never makes posture or fall decisions."""
+"""Vista opcional de diagnóstico, sin intervenir en la detección."""
 
 from importlib import import_module
 from math import isfinite
@@ -7,7 +7,7 @@ import time
 from fall_detection import EventType
 
 
-# MediaPipe's 33-landmark topology; drawing only, independent of inference API.
+# Conexiones entre los 33 puntos de MediaPipe, usadas solo para dibujar.
 POSE_CONNECTIONS = (
     (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8), (9, 10),
     (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21), (17, 19),
@@ -35,7 +35,7 @@ def diagnostic_lines(result, diagnostic=None):
 
 
 class FallingIndicator:
-    """Retain a FALLING event for display time without altering detector time/state."""
+    """Mantiene visible FALLING sin cambiar el tiempo ni el estado del detector."""
 
     def __init__(self, hold_seconds=2.0):
         self.hold_seconds = hold_seconds
@@ -61,7 +61,8 @@ class OpenCVPreview:
         self._cv.namedWindow(self.title, self._cv.WINDOW_NORMAL)
         return self
 
-    def show(self, frame, observation, result, *, delay_ms=1, notice=None, alert=None):
+    def show(self, frame, observation, result, *, delay_ms=1, notice=None, alert=None,
+             notification=None):
         image = frame.copy()
         height, width = image.shape[:2]
         points = {}
@@ -75,14 +76,19 @@ class OpenCVPreview:
                 self._cv.line(image, points[a], points[b], (0, 210, 255), 2)
         for point in points.values():
             self._cv.circle(image, point, 3, (80, 240, 80), -1)
-        # Add a panel below the frame so diagnostics never cover the person.
+        # El panel va debajo de la imagen para no tapar a la persona.
         lines = diagnostic_lines(result, observation.diagnostic)
         falling_notice = self._falling_indicator.observe(result, time.monotonic())
         if falling_notice:
             lines.insert(-1, falling_notice)
         if alert is not None:
-            remaining = "" if alert.remaining_seconds is None else f" ({alert.remaining_seconds:.1f}s)"
-            lines.insert(-1, f"Alerta local: {alert.state.value}{remaining} | sin envio externo")
+            remaining = ("" if alert.remaining_seconds is None
+                         else f" ({alert.remaining_seconds:.1f}s restantes)")
+            text = ("Alerta pausada por recuperacion" if alert.paused
+                    else f"Alerta local: {alert.state.value}")
+            if notification is not None:
+                text = notification
+            lines.insert(-1, f"{text}{remaining}")
         if notice:
             lines.insert(-1, notice)
         image = self._cv.copyMakeBorder(image, 0, 30 * len(lines), 0, max(0, 960 - width),
@@ -97,7 +103,7 @@ class OpenCVPreview:
         try:
             return self._cv.getWindowProperty(self.title, self._cv.WND_PROP_VISIBLE) >= 1
         except self._cv.error:
-            # Some GUI backends raise when the user has already closed the window.
+            # OpenCV puede lanzar un error si la ventana ya se cerró.
             return False
 
     def __exit__(self, exc_type, exc, traceback):

@@ -1,1 +1,1 @@
-"""Frame sources, pose estimation and diagnostics, outside the detector engine."""
+"""Captura de imágenes, estimación de postura y vista de diagnóstico."""

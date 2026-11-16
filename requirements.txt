@@ -1,4 +1,7 @@
-# Windows x64, Python 3.10-3.12. Tasks API; one cv2 distribution only.
+# Windows de 64 bits, Python 3.10 a 3.12. API Tasks; instalar una sola distribución de cv2.
 mediapipe==0.10.21
 opencv-contrib-python==4.11.0.86
 numpy==1.26.4
+SQLAlchemy==2.0.57
+alembic==1.20.1
+psycopg[binary]==3.3.9

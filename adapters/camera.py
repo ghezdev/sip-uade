@@ -1,4 +1,4 @@
-"""OpenCV frame source with separate live and media clocks."""
+"""Captura con OpenCV: reloj monotónico para cámara y tiempo del archivo para video."""
 
 from dataclasses import dataclass
 from importlib import import_module
@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional
 
 
 class CaptureError(RuntimeError):
-    """The source could not be opened, decoded or timestamped."""
+    """No se pudo abrir la fuente, leer una imagen u obtener su tiempo."""
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class CapturedFrame:
 
 
 class OpenCVSource:
-    """One local camera index or video path. read() returns None only at video EOF."""
+    """Lee una cámara o un archivo de video. read() devuelve None solo al terminar el video."""
 
     def __init__(self, source=0, *, video_fps: Optional[float] = None,
                  cv2_module=None, clock: Callable[[], float] = time.monotonic):
@@ -77,7 +77,7 @@ class OpenCVSource:
             timestamp = self._video_time() if self.is_video else self._clock()
             if (not isfinite(timestamp) or timestamp < 0 or
                     (self._last_timestamp is not None and timestamp <= self._last_timestamp)):
-                raise CaptureError("La fuente no produjo timestamps monotónicos crecientes")
+                raise CaptureError("La fuente no produjo tiempos válidos y siempre crecientes")
             result = CapturedFrame(image, timestamp, self._index)
             self._last_timestamp = timestamp
             self._index += 1
@@ -99,7 +99,8 @@ class OpenCVSource:
                 return timestamp
         if self.fps is None:
             raise CaptureError("Video sin tiempos utilizables; indica --video-fps con su FPS real")
-        self._fallback = True  # stay on one fallback clock after a broken media timestamp
+        # Si falla el tiempo del video, seguimos con FPS para no mezclar relojes.
+        self._fallback = True
         self.timing_warning = "Tiempos de video no disponibles: aproximando con FPS constantes"
         return 0.0 if self._last_timestamp is None else self._last_timestamp + 1 / self.fps
 

@@ -1,4 +1,4 @@
-"""Local alert timing; no delivery channels or detector internals."""
+"""Cuenta regresiva y notificaciones de alerta y recuperación."""
 
 from .workflow import AlertSnapshot, AlertState, AlertWorkflow
 

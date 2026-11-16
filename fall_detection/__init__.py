@@ -1,4 +1,4 @@
-"""Pure Python fall detector. Public API for synthetic and future pose inputs."""
+"""Motor de detección que recibe mediciones sin depender de una cámara."""
 
 from .config import DetectorConfig
 from .engine import FallDetector

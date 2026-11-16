@@ -1,4 +1,4 @@
-"""Geometry and temporal evidence, independent of frames, clocks and alerts."""
+"""Detección por postura y movimiento, sin cámara, relojes propios ni alertas."""
 
 from collections import deque
 from math import isfinite
@@ -18,11 +18,11 @@ def _finite(value: object) -> bool:
 
 
 class FallDetector:
-    """Single-owner, single-person stream using caller-supplied monotonic seconds.
+    """Procesa una persona, con llamadas secuenciales y tiempos siempre crecientes.
 
-    ON_FLOOR means a compatible posture, never confirmed scene location.
-    Floor time accumulates observed horizontal intervals only. Recovery and gaps
-    pause it; only confirmed stable recovery closes an established floor episode.
+    ON_FLOOR indica una postura compatible con estar en el suelo, no su ubicación.
+    Solo acumula tiempo horizontal observado. Los intentos de recuperación y la
+    falta de datos lo pausan; la recuperación estable confirmada cierra el episodio.
     """
 
     def __init__(self, config: Optional[DetectorConfig] = None) -> None:
@@ -45,19 +45,19 @@ class FallDetector:
         self._posture_since = None
 
     def update(self, measurement: Measurement) -> DetectorResult:
-        t = measurement.timestamp
-        if not _finite(t) or t < 0:
-            raise ValueError("timestamp must be finite, nonnegative monotonic seconds")
-        if self._last_timestamp is not None and t <= self._last_timestamp:
-            raise ValueError("timestamps must be strictly increasing")
-        self._last_timestamp = t
+        timestamp = measurement.timestamp
+        if not _finite(timestamp) or timestamp < 0:
+            raise ValueError("timestamp debe ser un número finito no negativo, en segundos crecientes")
+        if self._last_timestamp is not None and timestamp <= self._last_timestamp:
+            raise ValueError("Cada timestamp debe ser mayor que el anterior")
+        self._last_timestamp = timestamp
         events: list[DetectorEvent] = []
-        since_valid = None if self._last_valid is None else t - self._last_valid
+        since_valid = None if self._last_valid is None else timestamp - self._last_valid
         reason = self._invalid_reason(measurement)
         if (self._tracked and since_valid is not None
                 and since_valid >= self.config.tracking_timeout_seconds):
             self._tracked = False
-            self._emit(events, Event.PERSON_LOST, t)
+            self._emit(events, Event.PERSON_LOST, timestamp)
             self._break_continuity()
             if self._episode_id is None:
                 self._state = State.NO_PERSON
@@ -66,13 +66,15 @@ class FallDetector:
             tracking = Tracking.INVALID if measurement.person_present else Tracking.ABSENT
             if not self._tracked and self._last_valid is not None:
                 tracking = Tracking.LOST
-            return self._result(t, tracking, events, reason=reason)
+            return self._result(
+                timestamp=timestamp, tracking=tracking, events=events, reason=reason,
+            )
         if since_valid is not None and since_valid > self.config.max_sample_gap_seconds:
             self._break_continuity()
         if not self._tracked:
             self._tracked = True
-            self._emit(events, Event.PERSON_DETECTED, t)
-        self._last_valid = t
+            self._emit(events, Event.PERSON_DETECTED, timestamp)
+        self._last_valid = timestamp
 
         lying = self._lying(measurement)
         if self._criterion == Criterion.RAPID_DESCENT:
@@ -82,154 +84,183 @@ class FallDetector:
         if self._episode_id is None:
             self._monitor(measurement, lying, speed, descent, baseline, posture_candidate, events)
         if self._state == State.FALLING:
-            if t - self._fall_started > self.config.fall_timeout_seconds:
+            if timestamp - self._fall_started > self.config.fall_timeout_seconds:
                 self._clear_episode()
                 self._state = self._normal_state(measurement)
             elif lying or measurement.aspect_ratio >= self.config.lying_aspect_ratio:
                 lying = True
-                self._enter_floor(t, events)
+                self._enter_floor(timestamp, events)
         if self._state in (State.ON_FLOOR, State.RECOVERING):
             self._advance_episode(measurement, lying, events)
-        return self._result(t, Tracking.VALID, events, measurement, speed, descent,
-                            angle_change, body_descent)
+        return self._result(
+            timestamp=timestamp,
+            tracking=Tracking.VALID,
+            events=events,
+            measurement=measurement,
+            speed=speed,
+            descent=descent,
+            angle_change=angle_change,
+            body_descent=body_descent,
+        )
 
-    def _lying(self, m: Measurement) -> bool:
-        if m.torso_angle is None:
-            return m.aspect_ratio >= self.config.lying_aspect_ratio
-        # A wide seated silhouette alone is insufficient. Angle also allows
-        # rotated, partly foreshortened bodies below the old aspect threshold.
-        return (m.torso_angle >= self.config.lying_torso_angle
-                and m.aspect_ratio >= self.config.upright_aspect_ratio)
+    def _lying(self, measurement: Measurement) -> bool:
+        if measurement.torso_angle is None:
+            return measurement.aspect_ratio >= self.config.lying_aspect_ratio
+        # Una silueta ancha al sentarse no basta. El ángulo permite reconocer
+        # cuerpos girados que se ven más cortos por la perspectiva.
+        return (measurement.torso_angle >= self.config.lying_torso_angle
+                and measurement.aspect_ratio >= self.config.upright_aspect_ratio)
 
-    def _normal_state(self, m: Measurement) -> State:
-        return State.STANDING if m.aspect_ratio <= self.config.upright_aspect_ratio else State.UNKNOWN
+    def _normal_state(self, measurement: Measurement) -> State:
+        return (
+            State.STANDING
+            if measurement.aspect_ratio <= self.config.upright_aspect_ratio
+            else State.UNKNOWN
+        )
 
-    def _observe(self, m: Measurement):
-        t = m.timestamp
-        while len(self._history) > 1 and self._history[1].timestamp <= t - self.config.posture_window_seconds:
+    def _observe(self, measurement: Measurement):
+        timestamp = measurement.timestamp
+        while (
+            len(self._history) > 1
+            and self._history[1].timestamp <= timestamp - self.config.posture_window_seconds
+        ):
             self._history.popleft()
-        motion_ref = None
+        motion_reference = None
         for previous in self._history:
-            if previous.timestamp <= t - self.config.speed_window_seconds:
-                motion_ref = previous
-        baseline = next((p for p in self._history if not self._lying(p)), None)
-        self._history.append(m)
-        if motion_ref is None:
+            if previous.timestamp <= timestamp - self.config.speed_window_seconds:
+                motion_reference = previous
+        baseline = next((previous for previous in self._history if not self._lying(previous)), None)
+        self._history.append(measurement)
+        if motion_reference is None:
             return None, None, baseline
-        descent = (m.hip_y - motion_ref.hip_y) / motion_ref.torso_length
-        return descent / (t - motion_ref.timestamp), descent, baseline
+        descent = (measurement.hip_y - motion_reference.hip_y) / motion_reference.torso_length
+        return descent / (timestamp - motion_reference.timestamp), descent, baseline
 
-    def _posture_evidence(self, m: Measurement, baseline):
+    def _posture_evidence(self, measurement: Measurement, baseline):
         if baseline is None:
             return None, None, False
-        descent = (m.hip_y - baseline.hip_y) / baseline.torso_length
-        if m.shoulder_y is not None and baseline.shoulder_y is not None:
-            descent = max(descent, (m.shoulder_y - baseline.shoulder_y) / baseline.torso_length)
-        c = self.config
-        if m.torso_angle is not None and baseline.torso_angle is not None:
-            change = m.torso_angle - baseline.torso_angle
-            changed = change >= c.posture_angle_change
-            rotated = change >= c.posture_rotation_threshold
+        descent = (measurement.hip_y - baseline.hip_y) / baseline.torso_length
+        if measurement.shoulder_y is not None and baseline.shoulder_y is not None:
+            descent = max(
+                descent,
+                (measurement.shoulder_y - baseline.shoulder_y) / baseline.torso_length,
+            )
+        config = self.config
+        if measurement.torso_angle is not None and baseline.torso_angle is not None:
+            change = measurement.torso_angle - baseline.torso_angle
+            changed = change >= config.posture_angle_change
+            rotated = change >= config.posture_rotation_threshold
         else:
             change = None
-            changed = m.aspect_ratio - baseline.aspect_ratio >= c.posture_aspect_change
+            changed = measurement.aspect_ratio - baseline.aspect_ratio >= config.posture_aspect_change
             rotated = False
-        return change, descent, changed and (descent >= c.posture_min_descent or rotated)
+        return change, descent, changed and (descent >= config.posture_min_descent or rotated)
 
-    def _monitor(self, m, lying, speed, descent, baseline, posture_candidate, events):
-        t = m.timestamp
-        self._state = self._normal_state(m)
+    def _monitor(self, measurement, lying, speed, descent, baseline, posture_candidate, events):
+        timestamp = measurement.timestamp
+        self._state = self._normal_state(measurement)
         if not lying:
             self._horizontal_since = None
             self._posture_since = None
         elif self._horizontal_since is None:
-            self._horizontal_since = t
+            self._horizontal_since = timestamp
         if not (lying and posture_candidate):
             self._posture_since = None
         elif self._posture_since is None:
-            self._posture_since = t
-        c = self.config
+            self._posture_since = timestamp
+        config = self.config
         if (baseline is not None and speed is not None
-                and speed >= c.fall_speed_threshold and descent >= c.min_descent):
+                and speed >= config.fall_speed_threshold and descent >= config.min_descent):
             self._start_episode(Criterion.RAPID_DESCENT, baseline)
             self._state = State.FALLING
-            self._fall_started = t
-            self._emit(events, Event.FALL_STARTED, t)
-        elif self._posture_since is not None and t - self._posture_since >= c.posture_hold_seconds:
+            self._fall_started = timestamp
+            self._emit(events, Event.FALL_STARTED, timestamp)
+        elif (
+            self._posture_since is not None
+            and timestamp - self._posture_since >= config.posture_hold_seconds
+        ):
             self._start_episode(Criterion.POSTURE_CHANGE, baseline)
-            self._emit(events, Event.FALL_SUSPECTED, t)
-            self._enter_floor(t, events, t - self._horizontal_since)
-        elif self._horizontal_since is not None and t - self._horizontal_since >= c.floor_persistence_seconds:
+            self._emit(events, Event.FALL_SUSPECTED, timestamp)
+            self._enter_floor(timestamp, events, timestamp - self._horizontal_since)
+        elif (
+            self._horizontal_since is not None
+            and timestamp - self._horizontal_since >= config.floor_persistence_seconds
+        ):
             self._start_episode(Criterion.PERSISTENT_POSTURE, baseline)
-            self._emit(events, Event.FALL_SUSPECTED, t)
-            self._enter_floor(t, events, t - self._horizontal_since)
+            self._emit(events, Event.FALL_SUSPECTED, timestamp)
+            self._enter_floor(timestamp, events, timestamp - self._horizontal_since)
 
     def _start_episode(self, criterion, baseline):
         self._episode_id = str(uuid4())
         self._criterion = criterion
         self._reference = baseline
 
-    def _enter_floor(self, t, events, observed_seconds=0.0):
+    def _enter_floor(self, timestamp, events, observed_seconds=0.0):
         self._state = State.ON_FLOOR
         self._floor_seconds += observed_seconds
-        self._floor_previous = t
+        self._floor_previous = timestamp
         if not self._on_floor_emitted:
-            self._emit(events, Event.PERSON_ON_FLOOR, t)
+            self._emit(events, Event.PERSON_ON_FLOOR, timestamp)
             self._on_floor_emitted = True
 
-    def _recovered_pose(self, m):
-        c = self.config
-        vertical = (m.torso_angle <= c.upright_torso_angle if m.torso_angle is not None
-                    else m.aspect_ratio <= c.upright_aspect_ratio)
+    def _recovered_pose(self, measurement):
+        config = self.config
+        vertical = (
+            measurement.torso_angle <= config.upright_torso_angle
+            if measurement.torso_angle is not None
+            else measurement.aspect_ratio <= config.upright_aspect_ratio
+        )
         if not vertical:
             return False
         if self._reference is None:
             return True
-        return ((m.hip_y - self._reference.hip_y) / self._reference.torso_length
-                <= c.recovery_hip_tolerance)
+        return ((measurement.hip_y - self._reference.hip_y) / self._reference.torso_length
+                <= config.recovery_hip_tolerance)
 
-    def _advance_episode(self, m, lying, events):
-        t = m.timestamp
+    def _advance_episode(self, measurement, lying, events):
+        timestamp = measurement.timestamp
         if lying:
             self._state = State.ON_FLOOR
             self._recovery_since = None
             if self._floor_previous is not None:
-                self._floor_seconds += t - self._floor_previous
-            self._floor_previous = t
+                self._floor_seconds += timestamp - self._floor_previous
+            self._floor_previous = timestamp
             if not self._confirmed and self._floor_seconds >= self.config.floor_confirm_seconds:
-                self._emit(events, Event.FALL_CONFIRMED, t)
+                self._emit(events, Event.FALL_CONFIRMED, timestamp)
                 self._confirmed = True
         else:
             self._state = State.RECOVERING
             self._floor_previous = None
-            if not self._recovered_pose(m):
+            if not self._recovered_pose(measurement):
                 self._recovery_since = None
             elif self._recovery_since is None:
-                self._recovery_since = t
-            elif t - self._recovery_since >= self.config.recovery_seconds:
-                self._emit(events, Event.PERSON_RECOVERED, t)
+                self._recovery_since = timestamp
+            elif timestamp - self._recovery_since >= self.config.recovery_seconds:
+                self._emit(events, Event.PERSON_RECOVERED, timestamp)
                 self._clear_episode()
                 self._state = State.RECOVERED
 
-    def _invalid_reason(self, m: Measurement) -> Optional[str]:
-        if not isinstance(m.person_present, bool):
-            return "person_present must be a bool"
-        if not m.person_present:
+    def _invalid_reason(self, measurement: Measurement) -> Optional[str]:
+        if not isinstance(measurement.person_present, bool):
+            return "person_present debe ser un booleano"
+        if not measurement.person_present:
             return "person_absent"
-        if not _finite(m.visibility) or not 0 <= m.visibility <= 1:
-            return "visibility must be finite and between 0 and 1"
-        if m.visibility < self.config.min_visibility:
+        if not _finite(measurement.visibility) or not 0 <= measurement.visibility <= 1:
+            return "visibility debe ser un número finito entre 0 y 1"
+        if measurement.visibility < self.config.min_visibility:
             return "low_visibility"
-        if not _finite(m.hip_y):
-            return "hip_y must be finite"
-        if not _finite(m.torso_length) or m.torso_length <= 0:
-            return "torso_length must be finite and positive"
-        if not _finite(m.aspect_ratio) or m.aspect_ratio <= 0:
-            return "aspect_ratio must be finite and positive"
-        if m.shoulder_y is not None and not _finite(m.shoulder_y):
-            return "shoulder_y must be finite when supplied"
-        if m.torso_angle is not None and (not _finite(m.torso_angle) or not 0 <= m.torso_angle <= 90):
-            return "torso_angle must be between 0 and 90 degrees"
+        if not _finite(measurement.hip_y):
+            return "hip_y debe ser un número finito"
+        if not _finite(measurement.torso_length) or measurement.torso_length <= 0:
+            return "torso_length debe ser un número finito y positivo"
+        if not _finite(measurement.aspect_ratio) or measurement.aspect_ratio <= 0:
+            return "aspect_ratio debe ser un número finito y positivo"
+        if measurement.shoulder_y is not None and not _finite(measurement.shoulder_y):
+            return "shoulder_y debe ser un número finito cuando se incluye"
+        if measurement.torso_angle is not None and (
+            not _finite(measurement.torso_angle) or not 0 <= measurement.torso_angle <= 90
+        ):
+            return "torso_angle debe ser un número finito entre 0 y 90 grados"
         return None
 
     def _break_continuity(self):
@@ -252,26 +283,32 @@ class FallDetector:
         self._horizontal_since = None
         self._posture_since = None
 
-    def _emit(self, events, kind, t):
-        events.append(DetectorEvent(str(uuid4()), kind, t, self._episode_id,
-                                    self._floor_seconds, self._criterion))
+    def _emit(self, events, kind, timestamp):
+        events.append(DetectorEvent(
+            event_id=str(uuid4()),
+            type=kind,
+            timestamp=timestamp,
+            episode_id=self._episode_id,
+            floor_seconds=self._floor_seconds,
+            criterion=self._criterion,
+        ))
 
-    def _result(self, t, tracking, events, m=None, speed=None, descent=None,
+    def _result(self, timestamp, tracking, events, measurement=None, speed=None, descent=None,
                 angle_change=None, body_descent=None, reason=None):
         return DetectorResult(
-            timestamp=t, state=self._state if self._tracked else State.NO_PERSON,
+            timestamp=timestamp, state=self._state if self._tracked else State.NO_PERSON,
             tracking=tracking, events=tuple(events), episode_id=self._episode_id,
             criterion=self._criterion,
             metrics=DebugMetrics(
                 fall_speed=speed, hip_descent=descent,
-                aspect_ratio=m.aspect_ratio if m is not None else None,
+                aspect_ratio=measurement.aspect_ratio if measurement is not None else None,
                 floor_seconds=self._floor_seconds,
-                recovery_seconds=0.0 if self._recovery_since is None else t - self._recovery_since,
-                seconds_since_valid=None if self._last_valid is None else t - self._last_valid,
+                recovery_seconds=0.0 if self._recovery_since is None else timestamp - self._recovery_since,
+                seconds_since_valid=None if self._last_valid is None else timestamp - self._last_valid,
                 invalid_reason=reason,
-                torso_angle=m.torso_angle if m is not None else None,
+                torso_angle=measurement.torso_angle if measurement is not None else None,
                 posture_change=angle_change, body_descent=body_descent,
                 candidate_seconds=(0.0 if self._horizontal_since is None or self._episode_id is not None
-                                   else t - self._horizontal_since),
+                                   else timestamp - self._horizontal_since),
             ),
         )

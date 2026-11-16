@@ -1,4 +1,4 @@
-"""Immutable input and output contracts; no camera or alert dependencies."""
+"""Datos de entrada y salida inmutables, sin dependencias de cámara o alertas."""
 
 from dataclasses import dataclass
 from enum import Enum
@@ -40,11 +40,11 @@ class DetectionCriterion(str, Enum):
 
 @dataclass(frozen=True)
 class Measurement:
-    """Seconds on one monotonic timeline; y grows downward.
+    """Medición con tiempo en segundos siempre creciente; el eje y crece hacia abajo.
 
-    hip_y and torso_length must use the same spatial scale. aspect_ratio
-    must be computed in an isotropic coordinate system by the future adapter.
-    Missing body values are allowed, so invalid inputs reach the engine.
+    hip_y y torso_length usan la misma escala. El adaptador calcula aspect_ratio
+    con ambos ejes en la misma escala. Se permiten datos corporales faltantes
+    para que el motor pueda informar una medición inválida.
     """
 
     timestamp: float
@@ -54,7 +54,7 @@ class Measurement:
     aspect_ratio: Optional[float] = None
     visibility: Optional[float] = None
     shoulder_y: Optional[float] = None
-    torso_angle: Optional[float] = None  # degrees from image vertical, 0..90
+    torso_angle: Optional[float] = None  # grados respecto de la vertical de la imagen, de 0 a 90
 
 
 @dataclass(frozen=True)

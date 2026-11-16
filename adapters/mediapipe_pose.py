@@ -1,4 +1,4 @@
-"""MediaPipe Tasks adapter. Geometry only; classification belongs to the engine."""
+"""Convierte las posturas de MediaPipe Tasks en mediciones para el motor."""
 
 from dataclasses import dataclass
 from importlib import import_module
@@ -10,7 +10,7 @@ from fall_detection import Measurement
 
 
 class PoseError(RuntimeError):
-    """Pose inference could not run; different from an absent/low confidence pose."""
+    """Falló el procesamiento de postura; no significa que la persona esté ausente."""
 
 
 @dataclass(frozen=True)
@@ -31,10 +31,10 @@ def landmarks_to_measurement(
     landmarks: Sequence[Landmark], timestamp: float, width: int, height: int,
     min_visibility: float,
 ) -> PoseObservation:
-    """Use frame-height units: x'=x*width/height, y'=y (isotropic).
+    """Usa el alto de la imagen como unidad: x'=x*width/height, y'=y.
 
-    Require shoulders/hips and eight visible in-frame landmarks. No clamping:
-    out-of-frame key points invalidate geometry rather than inventing a pose.
+    Exige hombros, caderas y al menos ocho puntos visibles dentro de la imagen.
+    Si un hombro o una cadera queda afuera, la medición se marca como inválida.
     """
     points = tuple(landmarks)
     if not points:
@@ -55,7 +55,7 @@ def landmarks_to_measurement(
     if not all(usable(p) for p in key):
         return invalid("Hombros/caderas fuera de imagen o con valores invalidos")
     visibility = min(p.visibility for p in key)
-    # Keep genuine low visibility, so the engine exposes low_visibility explicitly.
+    # Conservamos la visibilidad medida para que el motor informe low_visibility.
     if visibility < min_visibility:
         return PoseObservation(Measurement(timestamp, True, visibility=visibility), points,
                                "Baja visibilidad en hombros/caderas")
@@ -63,10 +63,11 @@ def landmarks_to_measurement(
     if len(visible) < 8:
         return invalid("Menos de ocho puntos visibles en la imagen")
     scale = width / height
-    shoulder_x = (key[0].x + key[1].x) * scale / 2
-    shoulder_y = (key[0].y + key[1].y) / 2
-    hip_x = (key[2].x + key[3].x) * scale / 2
-    hip_y = (key[2].y + key[3].y) / 2
+    left_shoulder, right_shoulder, left_hip, right_hip = key
+    shoulder_x = (left_shoulder.x + right_shoulder.x) * scale / 2
+    shoulder_y = (left_shoulder.y + right_shoulder.y) / 2
+    hip_x = (left_hip.x + right_hip.x) * scale / 2
+    hip_y = (left_hip.y + right_hip.y) / 2
     torso = hypot(shoulder_x - hip_x, shoulder_y - hip_y)
     body_height = max(p.y for p in visible) - min(p.y for p in visible)
     body_width = (max(p.x for p in visible) - min(p.x for p in visible)) * scale
@@ -81,10 +82,10 @@ def landmarks_to_measurement(
 
 
 class MediaPipePose:
-    """Reuse a single synchronous VIDEO task for webcam and video sequences.
+    """Reutiliza una tarea en modo VIDEO para cámara y archivos de video.
 
-    VIDEO mode allows backpressure without silently dropping inference callbacks.
-    Millisecond rounding is isolated here; the detector keeps original seconds.
+    Cada imagen se procesa antes de leer la siguiente, sin descartar resultados.
+    Solo MediaPipe recibe milisegundos; el motor conserva los segundos originales.
     """
 
     def __init__(self, model_path, *, min_visibility: float, mp_module=None, cv2_module=None):
@@ -119,7 +120,7 @@ class MediaPipePose:
             raise PoseError("El adaptador de pose no esta abierto")
         if (not isfinite(timestamp) or timestamp < 0 or
                 (self._last_timestamp is not None and timestamp <= self._last_timestamp)):
-            raise PoseError("La pose requiere timestamps crecientes en segundos")
+            raise PoseError("La postura requiere tiempos válidos y siempre crecientes, en segundos")
         try:
             rgb = self._cv.cvtColor(frame, self._cv.COLOR_BGR2RGB)
             image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
