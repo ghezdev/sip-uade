@@ -20,21 +20,18 @@ git clone https://github.com/ghezdev/sip-uade.git
 Set-Location sip-uade
 ```
 
-Creá y activá un entorno virtual de Python antes de instalar las dependencias:
+Con Docker Desktop abierto, prepará la instalación:
 
 ```powershell
-python -m pip install -r requirements.txt
+.\setup.bat
 ```
 
-Si todavía no está disponible el modelo de MediaPipe, descargalo:
-
-```powershell
-python runner.py --download-model
-```
+El script prepara el entorno, las dependencias, el modelo y PostgreSQL sin iniciar
+el detector. Puede repetirse y conserva los archivos y datos existentes.
 
 ## Configuración
 
-Copiá `.env.example` como `.env` y completá:
+Completá `.env`, que `setup.bat` crea desde `.env.example` si falta:
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=token_del_bot
@@ -44,25 +41,24 @@ TELEGRAM_CHAT_ID=chat_id_del_contacto
 El token se obtiene de `@BotFather`; el Chat ID corresponde al contacto que recibirá
 las alertas. Ese contacto debe abrir el bot y enviar `/start`.
 
-Con Docker Desktop abierto y el entorno virtual activado, prepará PostgreSQL y el contacto:
+Después de completar el Chat ID, volvé a ejecutar el script para registrar el contacto:
 
 ```powershell
-docker compose up -d --wait
-python -m alembic upgrade head
-python -m database.seed
-python -m database.configure_contact
+.\setup.bat
 ```
 
 ## Ejecución
 
-Con el entorno virtual activado:
+Para iniciar con la cámara 0, con Docker Desktop abierto:
 
 ```powershell
-# Cámara
-python runner.py --camera 0
+.\start.bat
+```
 
-# Video
-python runner.py --video "videos_prueba\fall-06-cam0.mp4" --crop right
+Para probar un video desde la terminal:
+
+```powershell
+.\.venv\Scripts\python.exe runner.py --video "videos_prueba\fall-06-cam0.mp4" --crop right
 ```
 
 Usá `--crop right` cuando necesites recortar el video.
