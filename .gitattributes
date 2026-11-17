@@ -1,0 +1,3 @@
+# CMD necesita CRLF en los scripts de Windows.
+*.bat text eol=crlf
+*.cmd text eol=crlf

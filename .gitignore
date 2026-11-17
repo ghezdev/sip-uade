@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+.env
+
+# Pruebas y material histórico conservados localmente
+/tests/
+/archive/
+
+# Se comparten solo los dos videos usados en el README
+/videos_prueba/*.mp4
+!/videos_prueba/fall-02-cam0.mp4
+!/videos_prueba/fall-06-cam0.mp4
+
+# Entorno virtual local y modelos descargados
+.venv/
+models/*.task
+
+# Cachés de pruebas y herramientas de análisis de código
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+
+# Reportes de cobertura
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Archivos generados al construir y empaquetar Python
+build/
+dist/
+*.egg-info/
+.eggs/

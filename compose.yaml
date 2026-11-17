@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: carewatch-postgres
+    environment:
+      POSTGRES_DB: carewatch
+      POSTGRES_USER: carewatch
+      POSTGRES_PASSWORD: carewatch_dev
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "carewatch", "-d", "carewatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
