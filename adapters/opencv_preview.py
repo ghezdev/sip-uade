@@ -17,13 +17,14 @@ POSE_CONNECTIONS = (
 )
 
 
-def diagnostic_lines(result, diagnostic=None):
+def diagnostic_lines(result, diagnostic=None, *, elapsed_seconds=None):
     def number(value):
         return "--" if value is None else f"{value:.2f}"
     m = result.metrics
+    display_time = result.timestamp if elapsed_seconds is None else elapsed_seconds
     return [
         f"Estado: {result.state.value} | Seguimiento: {result.tracking.value}",
-        f"t={result.timestamp:.2f}s  aspecto={number(m.aspect_ratio)}  "
+        f"t={display_time:.2f}s  aspecto={number(m.aspect_ratio)}  "
         f"descenso={number(m.hip_descent)}  velocidad={number(m.fall_speed)}",
         f"Criterio: {result.criterion.value if result.criterion else '--'} | "
         f"Torso: {number(m.torso_angle)} grados | Descenso corporal: {number(m.body_descent)}",
@@ -56,6 +57,7 @@ class OpenCVPreview:
         self.min_visibility = min_visibility
         self.title = "Detector de caidas - diagnostico"
         self._falling_indicator = FallingIndicator()
+        self._time_origin = None
 
     def __enter__(self):
         self._cv.namedWindow(self.title, self._cv.WINDOW_NORMAL)
@@ -77,7 +79,11 @@ class OpenCVPreview:
         for point in points.values():
             self._cv.circle(image, point, 3, (80, 240, 80), -1)
         # El panel va debajo de la imagen para no tapar a la persona.
-        lines = diagnostic_lines(result, observation.diagnostic)
+        if self._time_origin is None:
+            self._time_origin = result.timestamp
+        # Solo el tiempo mostrado es relativo; el detector conserva sus timestamps.
+        lines = diagnostic_lines(result, observation.diagnostic,
+                                 elapsed_seconds=result.timestamp - self._time_origin)
         falling_notice = self._falling_indicator.observe(result, time.monotonic())
         if falling_notice:
             lines.insert(-1, falling_notice)
